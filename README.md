@@ -1,2 +1,1 @@
-# streaming-churn-prediction
-Streaming platform churn predictor based on historical and real time data.
+# Movie streaming platform churn predictor based on historical data.
