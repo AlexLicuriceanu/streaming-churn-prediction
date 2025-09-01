@@ -4,6 +4,7 @@ from scipy.stats import truncnorm
 import string
 import seaborn as sns
 import matplotlib.pyplot as plt
+from scipy.stats import chi2_contingency
 
 N_USERS = 50_000
 np.random.seed(42)
@@ -109,10 +110,7 @@ def generate_ages(n, weights=(0.8, 0.2)):
     n_main = int(n * weights[0])
     n_older = n - n_main
 
-    # Main group: ages 18-40, peak at 28, std=6 for a broad peak
     ages_main = truncated_normal(n_main, mean=34, std=9, low=18, high=55)
-
-    # Older group: ages 41-80, slow falloff, mean=50, std=8
     ages_older = truncated_normal(n_older, mean=58, std=12, low=45, high=75)
 
     ages = np.concatenate([ages_main, ages_older])
@@ -140,7 +138,7 @@ def generate_daily_watch_hours(ages):
     watch_hours[middle_mask] = np.random.lognormal(mean=0.5, sigma=0.5, size=middle_mask.sum())
     watch_hours[senior_mask] = np.random.lognormal(mean=0.3, sigma=0.4, size=senior_mask.sum())
 
-    # Clip to realistic maximum (e.g., no one watches more than 12 hours/day)
+    # Clip to realistic maximum
     watch_hours = np.clip(watch_hours, 0, 8)
 
     # Optional rounding
@@ -149,7 +147,69 @@ def generate_daily_watch_hours(ages):
     return watch_hours
 
 
-genders_encoded = generate_categorical_feature(
+def generate_subscription_types(genders, ages, daily_watch_hours):
+    """
+    Fully vectorized generation of subscription types based on gender, age, and daily watch hours.
+
+    Args:
+        genders (np.ndarray or pd.Series): Array of genders.
+        ages (np.ndarray): Array of user ages.
+        daily_watch_hours (np.ndarray): Array of daily watch hours.
+
+    Returns:
+        np.ndarray: Array of subscription types ("Premium", "Standard", "Basic").
+    """
+
+    genders = np.array(genders)
+    ages = np.array(ages)
+    watch_hours = np.array(daily_watch_hours)
+    n = len(genders)
+
+    categories = np.array(["Premium", "Standard", "Basic"])
+
+    # Base probabilities per gender
+    base_probs_dict = {
+        "Male": np.array([0.25, 0.53, 0.22]),
+        "Female": np.array([0.1, 0.25, 0.65]),
+        "Other": np.array([0.15, 0.35, 0.5])
+    }
+
+    # Map base probabilities to each user
+    base_probs = np.zeros((n, 3))
+    for gender, probs in base_probs_dict.items():
+        mask = genders == gender
+        base_probs[mask] = probs
+
+    # Age factor: younger users more likely premium
+    age_factor = np.clip((50 - ages) / 50, 0, 1)
+
+    # Watch hours factor: higher daily hours == higher premium
+    watch_factor = np.clip(watch_hours / 12, 0, 1)
+
+    # Combined adjustment
+    combined_factor = 0.7 * age_factor + 0.3 * watch_factor
+    adjustment = combined_factor * 0.2  # max +20% boost to premium
+
+    # Apply adjustment: boost premium, reduce basic
+    base_probs[:, 0] += adjustment
+    base_probs[:, 2] -= adjustment
+
+    # Clip to [0,1] and normalize
+    base_probs = np.clip(base_probs, 0, 1)
+    base_probs /= base_probs.sum(axis=1, keepdims=True)
+
+    # Create cumulative sum for inverse transform sampling
+    cum_probs = np.cumsum(base_probs, axis=1)
+    rand_vals = np.random.rand(n, 1)
+    subscription_idx = (rand_vals < cum_probs).argmax(axis=1)
+
+    subscription = categories[subscription_idx]
+
+    return subscription
+
+
+
+genders = generate_categorical_feature(
     n=N_USERS,
     categories=["Male", "Female", "Other"],
     probs=[0.6, 0.35, 0.05],
@@ -157,21 +217,25 @@ genders_encoded = generate_categorical_feature(
     dtype=None
 )
 
-
 ages = generate_ages(N_USERS)
 daily_watch_hours = generate_daily_watch_hours(ages)
+subscription_types = generate_subscription_types(genders, ages, daily_watch_hours)
 
 df = pd.DataFrame({
     "customer_id": generate_customer_id(N_USERS),
-    "gender": genders_encoded,
+    "gender": genders,
     "age": ages,
-    "daily_watch_hours": daily_watch_hours
+    "daily_watch_hours": daily_watch_hours,
+    "subscription_type": subscription_types
 })
 
 df.to_csv("generated-dataset.csv", index=False)
 
 # Plot correlation matrix
-corr = df.corr(numeric_only=True)
+for col in df.select_dtypes(include=['object']).columns:
+    df[col] = pd.factorize(df[col])[0]
+
+corr = df.corr(method='pearson')
 
 plt.figure(figsize=(8, 6))
 sns.heatmap(corr, annot=True, cmap="coolwarm", fmt=".2f")
@@ -179,3 +243,25 @@ plt.title("Correlation Matrix")
 plt.tight_layout()
 plt.savefig("correlation_matrix.png")
 plt.close()
+
+
+
+def cramers_v(x, y):
+    """
+    Calculate Cramér's V for categorical-categorical association.
+    
+    Args:
+        x, y: Categorical variables (pd.Series or np.ndarray)
+        
+    Returns:
+        float: Cramér's V statistic
+    """
+    confusion_matrix = pd.crosstab(x, y)
+    chi2 = chi2_contingency(confusion_matrix)[0]
+    n = confusion_matrix.sum().sum()
+    k = min(confusion_matrix.shape)  # smaller of #rows or #columns
+    return np.sqrt(chi2 / (n * (k - 1)))
+
+# Example usage:
+v = cramers_v(df["gender"], df["subscription_type"])
+print("Cramér's V:", v)
