@@ -99,6 +99,46 @@ def generate_ages(n, weights=(0.8, 0.2)):
     return ages.astype(int)
 
 
+def generate_daily_watch_hours(ages):
+    """
+    Generate realistic daily watch hours for a streaming platform,
+    based on age (younger users watch more).
+
+    Args:
+        ages (np.ndarray): Array of user ages.
+
+    Returns:
+        np.ndarray: Daily watch hours per user.
+    """
+    watch_hours = np.zeros_like(ages, dtype=float)
+
+    # Age groups
+    young_mask = ages < 25
+    adult_mask = (ages >= 25) & (ages < 40)
+    middle_mask = (ages >= 40) & (ages < 60)
+    senior_mask = ages >= 60
+
+    # Generate watch hours for each group
+    watch_hours[young_mask] = truncated_normal(
+        n=young_mask.sum(), mean=3.5, std=1.0, low=1, high=6
+    )
+    watch_hours[adult_mask] = truncated_normal(
+        n=adult_mask.sum(), mean=2.5, std=0.8, low=1, high=4
+    )
+    watch_hours[middle_mask] = truncated_normal(
+        n=middle_mask.sum(), mean=1.8, std=0.7, low=0.5, high=3
+    )
+    watch_hours[senior_mask] = truncated_normal(
+        n=senior_mask.sum(), mean=1.0, std=0.5, low=0.2, high=2
+    )
+
+    # Small random noise for realism
+    watch_hours += np.random.normal(0, 0.2, size=len(ages))
+    watch_hours = watch_hours.round(2)
+    watch_hours = np.clip(watch_hours, 0, None)  # no negative hours
+
+    return watch_hours
+
 
 genders_encoded = generate_categorical_feature(
     n=N_USERS,
@@ -110,11 +150,13 @@ genders_encoded = generate_categorical_feature(
 
 
 ages = generate_ages(N_USERS)
+daily_watch_hours = generate_daily_watch_hours(ages)
 
 df = pd.DataFrame({
-    "customer-id": np.arange(1, N_USERS + 1),
+    "customer_id": np.arange(1, N_USERS + 1),
     "gender": genders_encoded,
-    "age": ages
+    "age": ages,
+    "daily_watch_hours": daily_watch_hours
 })
 
 df.to_csv("generated-dataset.csv", index=False)
