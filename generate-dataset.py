@@ -1,12 +1,49 @@
 import numpy as np
 import pandas as pd
 from scipy.stats import truncnorm
-
+import string
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 N_USERS = 50_000
 np.random.seed(42)
 
-def generate_categorical_feature(n, categories, probs, shuffle=True, dtype=None):
+def generate_customer_id(n=0):
+    """
+    Generate unique customer IDs.
+
+    Args:
+        n (int): Number of customer IDs to generate.
+
+    Returns:
+        np.ndarray: Array of customer IDs.
+    """
+    
+    chars = string.ascii_uppercase + string.digits
+    base = len(chars)
+    max_ids = base ** 8
+
+    if n > max_ids:
+        raise ValueError(f"Cannot generate more than {max_ids} unique 8-character IDs.")
+    
+    rng = np.random.default_rng()
+    
+    numbers = rng.choice(max_ids, size=n, replace=False)
+
+    def to_base36(num):
+        s = ""
+
+        for _ in range(8):
+            s = chars[num % base] + s
+            num //= base
+        return s
+    
+    ids = [to_base36(num) for num in numbers]
+
+    return np.array(ids)
+
+
+def generate_categorical_feature(n=0, categories=[], probs=None, shuffle=True, dtype=None):
     """
     Generate a categorical feature with custom categories and distributions
     
@@ -21,22 +58,6 @@ def generate_categorical_feature(n, categories, probs, shuffle=True, dtype=None)
     Returns:
         np.ndarray: Generated categorical feature.
     """
-
-    # Validate inputs
-    if n < 1:
-        raise ValueError("Number of samples must be positive")
-
-    if not categories:
-        raise ValueError("Categories list is empty")
-
-    if not probs:
-        raise ValueError("Probabilities list is empty")
-    
-    if np.sum(probs) != 1.0 and probs is not None:
-        raise ValueError(f"Probabilities must sum to 1 for categories {categories}")
-
-    if probs is not None and len(categories) != len(probs):
-        raise ValueError(f"Categories and probabilities must have the same length.")
 
     probs = np.array(probs)
     k = len(categories)
@@ -101,14 +122,8 @@ def generate_ages(n, weights=(0.8, 0.2)):
 
 def generate_daily_watch_hours(ages):
     """
-    Generate realistic daily watch hours for a streaming platform,
-    based on age (younger users watch more).
-
-    Args:
-        ages (np.ndarray): Array of user ages.
-
-    Returns:
-        np.ndarray: Daily watch hours per user.
+    Generate right-skewed daily watch hours for streaming platform users.
+    Younger users tend to watch more, with a long tail for heavy viewers.
     """
     watch_hours = np.zeros_like(ages, dtype=float)
 
@@ -118,24 +133,18 @@ def generate_daily_watch_hours(ages):
     middle_mask = (ages >= 40) & (ages < 60)
     senior_mask = ages >= 60
 
-    # Generate watch hours for each group
-    watch_hours[young_mask] = truncated_normal(
-        n=young_mask.sum(), mean=3.5, std=1.0, low=1, high=6
-    )
-    watch_hours[adult_mask] = truncated_normal(
-        n=adult_mask.sum(), mean=2.5, std=0.8, low=1, high=4
-    )
-    watch_hours[middle_mask] = truncated_normal(
-        n=middle_mask.sum(), mean=1.8, std=0.7, low=0.5, high=3
-    )
-    watch_hours[senior_mask] = truncated_normal(
-        n=senior_mask.sum(), mean=1.0, std=0.5, low=0.2, high=2
-    )
+    # Log-normal parameters (mean and sigma in log-space)
+    # Younger users: heavier tail
+    watch_hours[young_mask] = np.random.lognormal(mean=1.2, sigma=0.7, size=young_mask.sum())
+    watch_hours[adult_mask] = np.random.lognormal(mean=0.75, sigma=0.6, size=adult_mask.sum())
+    watch_hours[middle_mask] = np.random.lognormal(mean=0.5, sigma=0.5, size=middle_mask.sum())
+    watch_hours[senior_mask] = np.random.lognormal(mean=0.3, sigma=0.4, size=senior_mask.sum())
 
-    # Small random noise for realism
-    watch_hours += np.random.normal(0, 0.2, size=len(ages))
+    # Clip to realistic maximum (e.g., no one watches more than 12 hours/day)
+    watch_hours = np.clip(watch_hours, 0, 8)
+
+    # Optional rounding
     watch_hours = watch_hours.round(2)
-    watch_hours = np.clip(watch_hours, 0, None)  # no negative hours
 
     return watch_hours
 
@@ -153,10 +162,20 @@ ages = generate_ages(N_USERS)
 daily_watch_hours = generate_daily_watch_hours(ages)
 
 df = pd.DataFrame({
-    "customer_id": np.arange(1, N_USERS + 1),
+    "customer_id": generate_customer_id(N_USERS),
     "gender": genders_encoded,
     "age": ages,
     "daily_watch_hours": daily_watch_hours
 })
 
 df.to_csv("generated-dataset.csv", index=False)
+
+# Plot correlation matrix
+corr = df.corr(numeric_only=True)
+
+plt.figure(figsize=(8, 6))
+sns.heatmap(corr, annot=True, cmap="coolwarm", fmt=".2f")
+plt.title("Correlation Matrix")
+plt.tight_layout()
+plt.savefig("correlation_matrix.png")
+plt.close()
