@@ -400,6 +400,81 @@ def generate_subscription_tenure(subscription_types, ages):
     # Cap at 24 months
     return np.clip(tenure, 0, 24)
 
+def generate_regions(subscription_types, n_users):
+    """
+    Assign a region to each user account.
+
+    Args:
+        subscription_types (np.ndarray): Array of subscription types
+        n_users (int): Number of users
+
+    Returns:
+        np.ndarray: Array of regions
+    """
+    regions = np.array(["North America", "Europe", "Asia", "South America", "Other"])
+    
+    # Base probabilities for all users
+    base_probs = np.array([0.35, 0.25, 0.2, 0.15, 0.05])  # sums to 1
+
+    # Premium users slightly more likely in North America and Europe
+    probs_matrix = np.tile(base_probs, (n_users, 1))
+    
+    premium_mask = subscription_types == "Premium"
+    if premium_mask.any():
+        # Boost NA/Europe by +0.1, reduce others proportionally
+        probs_matrix[premium_mask, 0] += 0.05  # North America
+        probs_matrix[premium_mask, 1] += 0.05  # Europe
+        probs_matrix[premium_mask, 2:] -= 0.033  # Asia, SA, Other
+        probs_matrix = np.clip(probs_matrix, 0, None)
+        probs_matrix /= probs_matrix.sum(axis=1, keepdims=True)
+
+    # Vectorized sampling
+    cum_probs = np.cumsum(probs_matrix, axis=1)
+    rand_vals = np.random.rand(n_users, 1)
+    region_idx = (rand_vals < cum_probs).argmax(axis=1)
+    return regions[region_idx]
+
+def generate_last_login_days(subscription_types, daily_watch_hours, n_users):
+    """
+    Generate number of days since last login for each user.
+
+    Args:
+        subscription_types (np.ndarray): Array of subscription types
+        daily_watch_hours (np.ndarray): Array of daily watch hours
+        n_users (int): Number of users
+
+    Returns:
+        np.ndarray: Last login in days
+    """
+    last_login = np.zeros(n_users, dtype=int)
+
+    # Base mean login days per subscription type
+    base_means = {
+        "Basic": 15,
+        "Standard": 10,
+        "Premium": 5
+    }
+
+    # Generate from truncated normal for realism
+    for plan, mean in base_means.items():
+        mask = subscription_types == plan
+        if not mask.any():
+            continue
+
+        # Scale std by 50% of mean, truncate at 0 and 60
+        last_login[mask] = truncated_normal(
+            n=mask.sum(),
+            mean=mean,
+            std=mean*0.5,
+            low=0,
+            high=60
+        ).astype(int)
+
+    # Adjust by watch hours: heavy watchers log in more frequently
+    heavy_mask = daily_watch_hours > 3
+    last_login[heavy_mask] = (last_login[heavy_mask] * 0.7).astype(int)
+
+    return last_login
 
 genders = generate_categorical_feature(
     n=N_USERS,
@@ -416,6 +491,8 @@ profiles = generate_profiles(subscription_types, ages)
 genre_preference = generate_genre_preference(ages, genders)
 promotions_used = generate_promotions_used(subscription_types, ages, daily_watch_hours)
 tenure = generate_subscription_tenure(subscription_types, ages)
+regions = generate_regions(subscription_types, N_USERS)
+last_login = generate_last_login_days(subscription_types, daily_watch_hours, N_USERS)
 
 df = pd.DataFrame({
     "customer_id": generate_customer_id(N_USERS),
@@ -426,7 +503,9 @@ df = pd.DataFrame({
     "profiles": profiles,
     "genre_preference": genre_preference,
     "promotions_used": promotions_used,
-    "tenure": tenure
+    "tenure": tenure,
+    "region": regions,
+    "last_login": last_login
 })
 
 df.to_csv("generated-dataset.csv", index=False)
