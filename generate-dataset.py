@@ -4,9 +4,10 @@ from scipy.stats import truncnorm
 import string
 import seaborn as sns
 import matplotlib.pyplot as plt
-from scipy.stats import chi2_contingency
+import time
 
-N_USERS = 50_000
+N_USERS = 5_000_000
+FILE_NAME = "churn-dataset-very-large.csv"
 np.random.seed(42)
 
 def generate_customer_id(n=0):
@@ -194,7 +195,7 @@ def generate_subscription_types(genders, ages, daily_watch_hours):
     base_probs[:, 0] += adjustment
     base_probs[:, 2] -= adjustment
 
-    # Clip to [0,1] and normalize
+    # Clip to [0, 1] and normalize
     base_probs = np.clip(base_probs, 0, 1)
     base_probs /= base_probs.sum(axis=1, keepdims=True)
 
@@ -230,11 +231,11 @@ def generate_profiles(subscription_types, ages):
     }
 
     # Age effect: younger account owners slightly more likely to have fewer profiles
-    age_factor = np.clip((ages - 30) / 40, 0, 1)  # older → bigger household
+    age_factor = np.clip((ages - 30) / 40, 0, 1)  # older = bigger household
     for i, sub in enumerate(subscription_types):
         probs = np.array(probs_map[sub], dtype=float)
 
-        # Adjust probabilities by age: older users → more profiles
+        # Adjust probabilities by age: older users = more profiles
         probs = probs * (1 - 0.2 * (1 - age_factor[i]))
         probs /= probs.sum()
 
@@ -351,7 +352,6 @@ def generate_promotions_used(subscription_types, ages, watch_hours):
 
         promos[mask] = bucket
 
-    # --- Adjust by age and watch_hours ---
     # Younger users: +20% chance of higher promo count
     young_mask = ages < 30
     promos[young_mask] += np.random.binomial(1, 0.2, size=young_mask.sum())
@@ -360,7 +360,7 @@ def generate_promotions_used(subscription_types, ages, watch_hours):
     heavy_mask = watch_hours > 3
     promos[heavy_mask] += np.random.binomial(1, 0.2, size=heavy_mask.sum())
 
-    # Clip to a reasonable max (e.g., 8 promos)
+    # Clip to a reasonable max
     promos = np.clip(promos, 0, 8)
 
     return promos
@@ -514,15 +514,15 @@ def generate_churn(
     base_prob[subscription_types == "Standard"] = 0.2
     base_prob[subscription_types == "Premium"] = 0.1
 
-    # Adjust by tenure: short-tenure → higher churn
+    # Adjust by tenure: short-tenure = higher churn
     tenure_factor = np.clip(6 - tenure, 0, 6) / 6
     base_prob += 0.2 * tenure_factor
 
-    # Adjust by daily watch hours: low watch → higher churn
+    # Adjust by daily watch hours: low watch = higher churn
     watch_factor = np.clip(3 - daily_watch_hours, 0, 3) / 3
     base_prob += 0.2 * watch_factor
 
-    # Adjust by last login: inactive → higher churn
+    # Adjust by last login: inactive = higher churn
     login_factor = np.clip(last_login, 0, 30) / 30
     base_prob += 0.25 * login_factor
 
@@ -530,7 +530,7 @@ def generate_churn(
     promo_factor = np.clip(promotions_used - 2, 0, 6) / 6
     base_prob += 0.1 * promo_factor
 
-    # Adjust by profiles: more profiles → slightly lower churn
+    # Adjust by profiles: more profiles = slightly lower churn
     profile_factor = np.clip(3 - profiles, 0, 3) / 3
     base_prob += 0.05 * profile_factor
 
@@ -542,6 +542,7 @@ def generate_churn(
 
     return churn
 
+start_time = time.time()
 
 genders = generate_categorical_feature(
     n=N_USERS,
@@ -589,17 +590,7 @@ df = pd.DataFrame({
     "churn": churn
 })
 
-df.to_csv("generated-dataset.csv", index=False)
+df.to_csv(FILE_NAME, index=False)
 
-# Plot correlation matrix
-for col in df.select_dtypes(include=['object']).columns:
-    df[col] = pd.factorize(df[col])[0]
-
-corr = df.corr(method='pearson')
-
-plt.figure(figsize=(8, 6))
-sns.heatmap(corr, annot=True, cmap="coolwarm", fmt=".2f")
-plt.title("Correlation Matrix")
-plt.tight_layout()
-plt.savefig("correlation_matrix.png")
-plt.close()
+end_time = time.time()
+print(f"Generated {N_USERS} samples in {end_time - start_time:.2f} seconds.")
