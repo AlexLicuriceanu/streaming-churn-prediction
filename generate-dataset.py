@@ -243,6 +243,129 @@ def generate_profiles(subscription_types, ages):
     return profiles
 
 
+def generate_genre_preference(ages, genders):
+    """
+    Generate a single genre preference for each user,
+    based on age and gender distributions.
+
+    Args:
+        ages (np.ndarray): User ages
+        genders (np.ndarray): User genders
+
+    Returns:
+        np.ndarray: Array of genre preferences (one per user)
+    """
+    genres = np.array([
+        "Action", "Comedy", "Drama", "Romance",
+        "Horror", "Sci-Fi", "Documentary", "Animation"
+    ])
+    
+    n = len(ages)
+    preferences = np.empty(n, dtype=object)
+
+    # Define base probability templates by age group
+    base_probs = {
+        "young": np.array([0.2, 0.2, 0.1, 0.05, 0.15, 0.15, 0.05, 0.1]),   # <25
+        "adult": np.array([0.15, 0.2, 0.2, 0.15, 0.1, 0.1, 0.05, 0.05]),  # 25–39
+        "middle": np.array([0.1, 0.15, 0.25, 0.15, 0.05, 0.05, 0.2, 0.05]), # 40–59
+        "senior": np.array([0.05, 0.1, 0.3, 0.25, 0.02, 0.03, 0.25, 0.0])   # 60+
+    }
+
+    # Gender adjustment vectors
+    gender_adj = {
+        "Male": np.array([0.05, 0.0, -0.02, -0.03, 0.02, 0.03, -0.02, 0.0]),
+        "Female": np.array([-0.03, 0.0, 0.05, 0.05, -0.02, -0.02, 0.0, 0.0]),
+        "Other": np.array([0.0, 0.02, 0.0, 0.0, 0.0, 0.0, 0.02, -0.02])
+    }
+
+    # Assign users to age groups
+    age_groups = np.full(n, "adult", dtype=object)
+    age_groups[ages < 25] = "young"
+    age_groups[(ages >= 40) & (ages < 60)] = "middle"
+    age_groups[ages >= 60] = "senior"
+
+    # Generate preferences per group in batches
+    for group, base in base_probs.items():
+        mask = age_groups == group
+        if not mask.any():
+            continue
+
+        # Get genders in this group
+        group_genders = genders[mask]
+        probs_matrix = np.tile(base, (mask.sum(), 1))  # replicate base probs
+
+        # Apply gender adjustments row-wise
+        for g, adj in gender_adj.items():
+            gmask = group_genders == g
+            if gmask.any():
+                probs_matrix[gmask] += adj
+
+        # Normalize each row
+        probs_matrix = np.clip(probs_matrix, 0, None)
+        probs_matrix /= probs_matrix.sum(axis=1, keepdims=True)
+
+        # Sample genres for this group
+        chosen = [np.random.choice(genres, p=row) for row in probs_matrix]
+        preferences[mask] = chosen
+
+    return preferences
+
+
+def generate_promotions_used(subscription_types, ages, watch_hours):
+    """
+    Generate number of promotional offers used by each user.
+    
+    Args:
+        subscription_types (np.ndarray): Subscription plan for each user
+        ages (np.ndarray): User ages
+        watch_hours (np.ndarray): Daily watch hours
+    
+    Returns:
+        np.ndarray: Number of promotional offers used
+    """
+    n = len(subscription_types)
+    promos = np.zeros(n, dtype=int)
+
+    # Base probabilities for promo usage by subscription
+    base_probs = {
+        "Basic":  [0.5, 0.3, 0.15, 0.05],   # 0,1,2,3+ 
+        "Standard": [0.65, 0.25, 0.08, 0.02],
+        "Premium": [0.8, 0.15, 0.04, 0.01]
+    }
+
+    # Iterate by subscription tier
+    for plan, probs in base_probs.items():
+        mask = subscription_types == plan
+        if not mask.any():
+            continue
+
+        # Draw promo buckets
+        bucket = np.random.choice(
+            [0, 1, 2, 3],  # 3 means "3 or more"
+            size=mask.sum(),
+            p=probs
+        )
+
+        # Convert "3" into 3–6 range for realism
+        bucket = np.where(bucket == 3, np.random.randint(3, 7, size=mask.sum()), bucket)
+
+        promos[mask] = bucket
+
+    # --- Adjust by age and watch_hours ---
+    # Younger users: +20% chance of higher promo count
+    young_mask = ages < 30
+    promos[young_mask] += np.random.binomial(1, 0.2, size=young_mask.sum())
+
+    # Heavy watchers: +20% chance of higher promo count
+    heavy_mask = watch_hours > 3
+    promos[heavy_mask] += np.random.binomial(1, 0.2, size=heavy_mask.sum())
+
+    # Clip to a reasonable max (e.g., 8 promos)
+    promos = np.clip(promos, 0, 8)
+
+    return promos
+
+
 genders = generate_categorical_feature(
     n=N_USERS,
     categories=["Male", "Female", "Other"],
@@ -255,6 +378,8 @@ ages = generate_ages(N_USERS)
 daily_watch_hours = generate_daily_watch_hours(ages)
 subscription_types = generate_subscription_types(genders, ages, daily_watch_hours)
 profiles = generate_profiles(subscription_types, ages)
+genre_preference = generate_genre_preference(ages, genders)
+promotions_used = generate_promotions_used(subscription_types, ages, daily_watch_hours)
 
 df = pd.DataFrame({
     "customer_id": generate_customer_id(N_USERS),
@@ -262,7 +387,9 @@ df = pd.DataFrame({
     "age": ages,
     "daily_watch_hours": daily_watch_hours,
     "subscription_type": subscription_types,
-    "profiles": profiles
+    "profiles": profiles,
+    "genre_preference": genre_preference,
+    "promotions_used": promotions_used
 })
 
 df.to_csv("generated-dataset.csv", index=False)
