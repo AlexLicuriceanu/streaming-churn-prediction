@@ -365,6 +365,41 @@ def generate_promotions_used(subscription_types, ages, watch_hours):
 
     return promos
 
+def generate_subscription_tenure(subscription_types, ages):
+    """
+    Generate subscription length (tenure) in months using truncated normals,
+    capped at 24 months. Premium stays longer, Basic shorter, with age adjustment.
+
+    Args:
+        subscription_types (np.ndarray): Subscription plan for each user
+        ages (np.ndarray): User ages (older users stay longer)
+
+    Returns:
+        np.ndarray: Tenure in months
+    """
+    n = len(subscription_types)
+    tenure = np.zeros(n, dtype=int)
+
+    # (mean, std, low, high) for each plan
+    params = {
+        "Basic": (4, 3, 0, 12),     # shorter, churn earlier
+        "Standard": (8, 4, 1, 18),  # moderate tenure
+        "Premium": (12, 6, 2, 24)   # longest
+    }
+
+    for plan, (mean, std, low, high) in params.items():
+        mask = subscription_types == plan
+        if not mask.any():
+            continue
+        tenure[mask] = truncated_normal(mask.sum(), mean, std, low, high).astype(int)
+
+    # Age adjustment: older users stick around a bit longer
+    age_bonus = np.where(ages > 40, np.random.poisson(2, size=n), 0)
+    tenure += age_bonus
+
+    # Cap at 24 months
+    return np.clip(tenure, 0, 24)
+
 
 genders = generate_categorical_feature(
     n=N_USERS,
@@ -380,6 +415,7 @@ subscription_types = generate_subscription_types(genders, ages, daily_watch_hour
 profiles = generate_profiles(subscription_types, ages)
 genre_preference = generate_genre_preference(ages, genders)
 promotions_used = generate_promotions_used(subscription_types, ages, daily_watch_hours)
+tenure = generate_subscription_tenure(subscription_types, ages)
 
 df = pd.DataFrame({
     "customer_id": generate_customer_id(N_USERS),
@@ -389,7 +425,8 @@ df = pd.DataFrame({
     "subscription_type": subscription_types,
     "profiles": profiles,
     "genre_preference": genre_preference,
-    "promotions_used": promotions_used
+    "promotions_used": promotions_used,
+    "tenure": tenure
 })
 
 df.to_csv("generated-dataset.csv", index=False)
