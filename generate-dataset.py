@@ -208,6 +208,40 @@ def generate_subscription_types(genders, ages, daily_watch_hours):
     return subscription
 
 
+def generate_profiles(subscription_types, ages):
+    """
+    Generate number of profiles created per user account.
+    
+    Args:
+        subscription_types (np.ndarray): Array of subscription types ("Premium", "Standard", "Basic")
+        ages (np.ndarray): User ages
+    
+    Returns:
+        np.ndarray: Number of profiles per account
+    """
+    n = len(subscription_types)
+    profiles = np.zeros(n, dtype=int)
+
+    # Base probabilities by subscription type
+    probs_map = {
+        "Basic":    [0.85, 0.12, 0.03, 0.0, 0.0],  # mostly 1 profile
+        "Standard": [0.25, 0.45, 0.20, 0.08, 0.02],  # mix of 2–3
+        "Premium":  [0.10, 0.25, 0.30, 0.20, 0.15]   # more likely 3–5
+    }
+
+    # Age effect: younger account owners slightly more likely to have fewer profiles
+    age_factor = np.clip((ages - 30) / 40, 0, 1)  # older → bigger household
+    for i, sub in enumerate(subscription_types):
+        probs = np.array(probs_map[sub], dtype=float)
+
+        # Adjust probabilities by age: older users → more profiles
+        probs = probs * (1 - 0.2 * (1 - age_factor[i]))
+        probs /= probs.sum()
+
+        profiles[i] = np.random.choice([1, 2, 3, 4, 5], p=probs)
+
+    return profiles
+
 
 genders = generate_categorical_feature(
     n=N_USERS,
@@ -220,13 +254,15 @@ genders = generate_categorical_feature(
 ages = generate_ages(N_USERS)
 daily_watch_hours = generate_daily_watch_hours(ages)
 subscription_types = generate_subscription_types(genders, ages, daily_watch_hours)
+profiles = generate_profiles(subscription_types, ages)
 
 df = pd.DataFrame({
     "customer_id": generate_customer_id(N_USERS),
     "gender": genders,
     "age": ages,
     "daily_watch_hours": daily_watch_hours,
-    "subscription_type": subscription_types
+    "subscription_type": subscription_types,
+    "profiles": profiles
 })
 
 df.to_csv("generated-dataset.csv", index=False)
@@ -243,8 +279,6 @@ plt.title("Correlation Matrix")
 plt.tight_layout()
 plt.savefig("correlation_matrix.png")
 plt.close()
-
-
 
 def cramers_v(x, y):
     """
