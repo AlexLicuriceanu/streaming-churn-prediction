@@ -476,6 +476,73 @@ def generate_last_login_days(subscription_types, daily_watch_hours, n_users):
 
     return last_login
 
+def generate_churn(
+    genders,
+    ages,
+    daily_watch_hours,
+    subscription_types,
+    profiles,
+    genre_preference,
+    promotions_used,
+    tenure,
+    regions,
+    last_login
+):
+    """
+    Generate a synthetic churn label (1 = churned, 0 = active) based on user features.
+
+    Args:
+        genders (np.ndarray): User genders
+        ages (np.ndarray): User ages
+        daily_watch_hours (np.ndarray): Daily watch hours
+        subscription_types (np.ndarray): Subscription types
+        profiles (np.ndarray): Number of profiles
+        genre_preference (np.ndarray): User genre preference
+        promotions_used (np.ndarray): Number of promotions used
+        tenure (np.ndarray): Subscription tenure in months
+        regions (np.ndarray): User regions
+        last_login (np.ndarray): Days since last login
+
+    Returns:
+        np.ndarray: Churn labels (1 = churned, 0 = active)
+    """
+    n = len(subscription_types)
+    
+    # Base churn probability by subscription type
+    base_prob = np.zeros(n)
+    base_prob[subscription_types == "Basic"] = 0.35
+    base_prob[subscription_types == "Standard"] = 0.2
+    base_prob[subscription_types == "Premium"] = 0.1
+
+    # Adjust by tenure: short-tenure → higher churn
+    tenure_factor = np.clip(6 - tenure, 0, 6) / 6
+    base_prob += 0.2 * tenure_factor
+
+    # Adjust by daily watch hours: low watch → higher churn
+    watch_factor = np.clip(3 - daily_watch_hours, 0, 3) / 3
+    base_prob += 0.2 * watch_factor
+
+    # Adjust by last login: inactive → higher churn
+    login_factor = np.clip(last_login, 0, 30) / 30
+    base_prob += 0.25 * login_factor
+
+    # Adjust by promotions used: heavy promo users slightly higher churn
+    promo_factor = np.clip(promotions_used - 2, 0, 6) / 6
+    base_prob += 0.1 * promo_factor
+
+    # Adjust by profiles: more profiles → slightly lower churn
+    profile_factor = np.clip(3 - profiles, 0, 3) / 3
+    base_prob += 0.05 * profile_factor
+
+    # Clip probability between 0 and 1
+    churn_prob = np.clip(base_prob, 0, 1)
+
+    # Sample churn (1 = churned, 0 = active)
+    churn = np.random.binomial(1, churn_prob)
+
+    return churn
+
+
 genders = generate_categorical_feature(
     n=N_USERS,
     categories=["Male", "Female", "Other"],
@@ -494,6 +561,19 @@ tenure = generate_subscription_tenure(subscription_types, ages)
 regions = generate_regions(subscription_types, N_USERS)
 last_login = generate_last_login_days(subscription_types, daily_watch_hours, N_USERS)
 
+churn = generate_churn(
+    genders,
+    ages,
+    daily_watch_hours,
+    subscription_types,
+    profiles,
+    genre_preference,
+    promotions_used,
+    tenure,
+    regions,
+    last_login
+)
+
 df = pd.DataFrame({
     "customer_id": generate_customer_id(N_USERS),
     "gender": genders,
@@ -505,7 +585,8 @@ df = pd.DataFrame({
     "promotions_used": promotions_used,
     "tenure": tenure,
     "region": regions,
-    "last_login": last_login
+    "last_login": last_login,
+    "churn": churn
 })
 
 df.to_csv("generated-dataset.csv", index=False)
@@ -522,23 +603,3 @@ plt.title("Correlation Matrix")
 plt.tight_layout()
 plt.savefig("correlation_matrix.png")
 plt.close()
-
-def cramers_v(x, y):
-    """
-    Calculate Cramér's V for categorical-categorical association.
-    
-    Args:
-        x, y: Categorical variables (pd.Series or np.ndarray)
-        
-    Returns:
-        float: Cramér's V statistic
-    """
-    confusion_matrix = pd.crosstab(x, y)
-    chi2 = chi2_contingency(confusion_matrix)[0]
-    n = confusion_matrix.sum().sum()
-    k = min(confusion_matrix.shape)  # smaller of #rows or #columns
-    return np.sqrt(chi2 / (n * (k - 1)))
-
-# Example usage:
-v = cramers_v(df["gender"], df["subscription_type"])
-print("Cramér's V:", v)
