@@ -25,7 +25,7 @@ python3 random-forest.py
 ```
 
 ## CCP-Net 
-Implemented the model detailed in the paper "CCP-Net: Hybrid Neural Network for Churn Prediction" by Liu et al.
+Implemented the model detailed in the [paper](https://www.nature.com/articles/s41598-024-79603-9) titled "CCP-Net: Hybrid Neural Network for Churn Prediction" by Liu et al. 
 ```bash
 python3 ccp-net.py
 ```
