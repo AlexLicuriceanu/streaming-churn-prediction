@@ -17,3 +17,13 @@ pip3 install -r requirements.txt
 ```bash
 python3 generate-dataset.py
 ```
+
+## Baselines
+```bash
+python3 logistic-regression.py
+python3 random-forest.py
+```
+
+## Results
+- Logistic Regression - 0.65 Accuracy
+- Random Forest - 0.66 Accuracy 
