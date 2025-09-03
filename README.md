@@ -24,6 +24,8 @@ python3 logistic-regression.py
 python3 random-forest.py
 ```
 
-## Results
-- Logistic Regression - 0.65 Accuracy
-- Random Forest - 0.66 Accuracy 
+## CCP-Net 
+Implemented the model detailed in the paper "CCP-Net: Hybrid Neural Network for Churn Prediction" by Liu et al.
+```bash
+python3 ccp-net.py
+```

@@ -4,3 +4,7 @@ seaborn
 matplotlib
 scipy
 scikit-learn
+torch
+torchvision
+tqdm
+imblearn
